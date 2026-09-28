@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>COMS</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;background:#1c1c1c;color:#eee;font-family:system-ui,sans-serif}
+  header{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:12px;height:52px;padding:0 12px;background:#000}
+  h1{flex:1;margin:0;font-size:17px;font-weight:600}
+  #cnt{font-size:14px;color:#aaa}
+  .btn{padding:9px 16px;border-radius:20px;background:#FDBB4E;color:#000;font-weight:600;font-size:14px;text-decoration:none}
+  #pages{padding:8px 0 24px}
+  .pg{margin:8px auto;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.5);scroll-margin-top:60px}
+  .pg canvas{display:block;width:100%;height:100%}
+  #msg{padding:40px 20px;text-align:center;color:#aaa}
+</style>
+</head>
+<body>
+<header>
+  <h1>COMS</h1>
+  <span id="cnt"></span>
+  <a class="btn" href="COMS.pdf" download="COMS.pdf">Download</a>
+</header>
+<div id="msg">Loading…</div>
+<div id="pages"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+(async () => {
+  const FILE = 'COMS.pdf';
+  const box = document.getElementById('pages'), msg = document.getElementById('msg'), cnt = document.getElementById('cnt');
+  const fail = () => { msg.innerHTML = 'Could not load the viewer. <a href="' + FILE + '" style="color:#FDBB4E">Open the PDF</a>'; };
+  if (!window.pdfjsLib) return fail();
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+  let pdf, sizes = [], width = 0;
+  const fitWidth = () => Math.min(document.documentElement.clientWidth - 16, 900);
+  const io = new IntersectionObserver(es => es.forEach(e => e.isIntersecting ? draw(e.target) : drop(e.target)), {rootMargin: '150% 0px'});
+
+  async function draw(el) {
+    el.want = true;
+    if (el.busy || el.done) return;
+    el.busy = true;
+    try {
+      const page = await pdf.getPage(+el.dataset.n);
+      if (!el.want) return;
+      const base = page.getViewport({scale: 1});
+      const vp = page.getViewport({scale: width / base.width * Math.min(devicePixelRatio || 1, 2.5)});
+      const c = document.createElement('canvas');
+      c.width = Math.floor(vp.width); c.height = Math.floor(vp.height);
+      el.task = page.render({canvasContext: c.getContext('2d'), viewport: vp});
+      await el.task.promise;
+      if (!el.want) { c.width = c.height = 0; return; }
+      el.replaceChildren(c); el.done = true;
+    } catch (e) { /* cancelled or failed: it will retry when scrolled back into view */ }
+    finally { el.busy = false; el.task = null; }
+  }
+  function drop(el) {
+    el.want = false;
+    if (el.task) el.task.cancel();
+    if (el.done) { const c = el.firstChild; if (c) c.width = c.height = 0; el.replaceChildren(); el.done = false; }
+  }
+
+  function curPage() {
+    const y = innerHeight * 0.4;
+    for (const el of box.children) if (el.getBoundingClientRect().bottom > y) return +el.dataset.n;
+    return pdf.numPages;
+  }
+  function label() { cnt.textContent = curPage() + ' / ' + pdf.numPages; }
+
+  function build() {
+    width = fitWidth();
+    io.disconnect(); box.innerHTML = '';
+    sizes.forEach((s, i) => {
+      const d = document.createElement('div');
+      d.className = 'pg'; d.dataset.n = i + 1;
+      d.style.width = width + 'px'; d.style.height = Math.round(width * s.h / s.w) + 'px';
+      box.appendChild(d); io.observe(d);
+    });
+    label();
+  }
+
+  let raf = 0, rt = 0;
+  addEventListener('scroll', () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; label(); }); }, {passive: true});
+  addEventListener('resize', () => {
+    clearTimeout(rt);
+    rt = setTimeout(() => {
+      if (!pdf || fitWidth() === width) return;
+      const n = curPage(); build(); box.children[n - 1].scrollIntoView();
+    }, 200);
+  });
+
+  try {
+    pdf = await pdfjsLib.getDocument(FILE).promise;
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const v = (await pdf.getPage(i)).getViewport({scale: 1});
+      sizes.push({w: v.width, h: v.height});
+    }
+    msg.remove(); build();
+  } catch (e) { fail(); }
+})();
+</script>
+</body>
+</html>
